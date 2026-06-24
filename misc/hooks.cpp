@@ -85,11 +85,12 @@ namespace hook
 		make_hook( server_cmd_key_values, "engine.dll", hook_server_cmd_key_values );
 		make_hook( set_abs_angles, "client.dll", sig_set_abs_angles );
 		make_hook_direct( draw_model_studio, ( *reinterpret_cast< uintptr_t** >( proxy::studio_render() ) )[ 29 ] );
-		///make_hook( present, "gameoverlayrenderer.dll", hook_present );
-		make_hook_direct(present, sig("gameoverlayrenderer.dll", "55 8B EC 83 EC ? 53 8B 5D ? 56 8B 35"));
-		make_hook_direct(reset, sig("gameoverlayrenderer.dll", "55 8B EC 6A ? 68 ? ? ? ? 64 A1 ? ? ? ? 50 64 89 25 ? ? ? ? 83 EC ? 53 8B 5D ? 56 57 8B 3D ? ? ? ? 33 F6 89 5D ? 85 FF 74 ? 6A ? 57 FF 15 ? ? ? ? 8B 3D ? ? ? ? 8D 45 ? B9 ? ? ? ? 50 8D 45 ? 50 E8 ? ? ? ? 8B 45 ? 8B 0D ? ? ? ? 80 78 ? ? 75 ? 3B 58 ? 73 ? 8B C1 3B C1 74 ? 8B 70 ? 85 FF 74 ? 57 FF 15 ? ? ? ? 85 F6 74 ? 8B CE E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 03 8D 4D ? 51 53 FF 50 ? 8B 7D ? 8D 4D ? 57 6A ? FF 75 ? E8 ? ? ? ? A1"));
-
-		//make_hook( reset, "gameoverlayrenderer.dll", hook_reset );
+		auto device = **reinterpret_cast<IDirect3DDevice9***>(sig("shaderapidx9.dll", "A1 ? ? ? ? 50 8B 08 FF 51 0C") + 1);
+		if (device)
+		{
+			make_hook_direct(present, (*reinterpret_cast<uintptr_t**>(device))[17]);
+			make_hook_direct(reset, (*reinterpret_cast<uintptr_t**>(device))[16]);
+		}
 		make_hook( send_net_msg, "engine.dll", hook_send_net_msg );
 		make_hook( override_view, "client.dll", hook_override_view );
 		make_hook( paint_traverse, "vgui2.dll", hook_paint_traverse );

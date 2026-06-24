@@ -1,5 +1,7 @@
 #pragma once
 
+#include "MinHook.h"
+
 class c_hook
 {
 public:
@@ -12,116 +14,30 @@ public:
 class c_detour : public c_hook
 {
 	void* original = nullptr;
-#ifndef RELEASE
-	std::vector<std::uint8_t> original_bytes;
-#endif
-	std::uint8_t* src{};
+	void* src = nullptr;
 
 public:
 	c_detour() = default;
-	__forceinline c_detour( uintptr_t ent ) : src( reinterpret_cast< std::uint8_t* >( ent ) )
+	__forceinline c_detour( uintptr_t ent ) : src( reinterpret_cast< void* >( ent ) )
 	{}
 
 	~c_detour() override
 	{
-#ifndef RELEASE
-		DWORD old_protect;
-		VirtualProtect( src, original_bytes.size(), PAGE_EXECUTE_READWRITE, &old_protect );
-		memcpy( src, original_bytes.data(), original_bytes.size() );
-		VirtualProtect( src, original_bytes.size(), old_protect, &old_protect );
-#endif
-		if ( original )
+		if ( src )
 		{
-			syscall( NtFreeVirtualMemory )( current_process, &original, nullptr, MEM_RELEASE );
-			sysunlock();
+			MH_DisableHook( src );
+			MH_RemoveHook( src );
 		}
 	}
 
 	__forceinline bool is_detour() override { return true; }
 
-	__forceinline static uint32_t length_disasm(uint8_t* op)
-	{
-		/*constexpr uintptr_t sig_length_disasm_game = 0x77890;
-
-		uint32_t size = 0, code = 0;
-
-		auto fn = reinterpret_cast<bool(*)(uint8_t*, uint32_t*, uint32_t*)>(
-			make_offset_simple("gameoverlayrenderer.dll", sig_length_disasm_game)
-			);
-
-		return fn(op, &size, &code) ? size : 0xFFFF;*/
-
-		auto fn = reinterpret_cast<bool(*)(uint8_t*, uint32_t*, uint32_t*)>(sig("gameoverlayrenderer.dll", "55 8B EC 53 56 57 8B 7D ? B8"));
-		uint32_t size = 0, code = 0;
-		return fn(op, &size, &code) ? size : 0xFFFF;
-
-	}
-
 	__forceinline uintptr_t apply( uintptr_t dest ) override
 	{
-		auto add = 0;
-		DWORD len = 0;
-		auto opcode = src;
-		while ( opcode - src < 5 )
-		{
-			if ( *opcode == 0xE8 )
-				add = len + 1;
-			if ( *opcode == 0x3B )
-				len += 2;
-			else if ( *opcode == 0x66 )
-				len += 5;
-			else
-				len += length_disasm( opcode );
-			opcode = src + len;
-		}
-
-		const auto op_code = std::make_unique<std::uint8_t[]>( len + 5 );
-		//auto return_mem = VirtualAlloc( nullptr, len + 5, MEM_COMMIT, PAGE_EXECUTE_READWRITE );
-		auto return_mem = memory::alloc_mem( len + 5 );
-		for ( std::uint32_t i = 0; i < len; i++ )
-		{
-			op_code[ i ] = src[ i ];
-#ifndef RELEASE
-			original_bytes.push_back( src[ i ] );
-#endif
-		}
-
-		op_code[ len ] = 0xE9;
-		*reinterpret_cast< std::uint32_t* >( op_code.get() + len + 1 ) = reinterpret_cast<
-			std::uint32_t
-		>( src ) - ( reinterpret_cast< std::uint32_t >( return_mem ) + 5 );
-
-		std::memcpy( return_mem, op_code.get(), len + 5 );
-
-		if ( add )
-		{
-			*reinterpret_cast< std::uint32_t* >( reinterpret_cast< std::uint32_t >( return_mem ) + add ) -= reinterpret_cast< uintptr_t >( return_mem );
-			*reinterpret_cast< std::uint32_t* >( reinterpret_cast< std::uint32_t >( return_mem ) + add ) += reinterpret_cast< uintptr_t >( src );
-		}
-
-		/*DWORD old_protect;
-		VirtualProtect( src, len, PAGE_EXECUTE_READWRITE, &old_protect );
-
-		*src = 0xE9;
-		*reinterpret_cast< std::uint32_t* >( src + 1 ) = ( uintptr_t ) ( dest ) -reinterpret_cast< std::uint32_t >( src ) - 5;
-		for ( std::uint32_t i = 5; i < len; ++i )
-			src[ i ] = 0x90;
-
-		VirtualProtect( src, len, old_protect, &old_protect );
-
-		return reinterpret_cast< Fn >( original = return_mem );*/
-
-		DWORD old_protect;
-		memory::protect_mem( src, len, PAGE_EXECUTE_READWRITE, old_protect );
-
-		*src = 0xE9;
-		*reinterpret_cast< std::uint32_t* >( src + 1 ) = ( uintptr_t ) ( dest ) -reinterpret_cast< std::uint32_t >( src ) - 5;
-		for ( std::uint32_t i = 5; i < len; ++i )
-			src[ i ] = 0x90;
-
-		memory::protect_mem( src, len, old_protect, old_protect );
-
-		return reinterpret_cast< uintptr_t >( original = return_mem );
+		MH_Initialize();
+		MH_CreateHook( src, reinterpret_cast< void* >( dest ), &original );
+		MH_EnableHook( src );
+		return reinterpret_cast< uintptr_t >( original );
 	}
 };
 
