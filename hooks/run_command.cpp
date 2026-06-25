@@ -78,6 +78,7 @@ void __fastcall hook::run_command( void* ecx, void* edx, C_BasePlayer* player, C
 		current_info.collision_viewheight = local_player->get_collision_viewheight();
 		current_info.collision_bounds_change_time = local_player->get_collision_bounds_change_time();
 		current_info.tick_base = player->get_tickbase();
+		current_info.tickbase.base = player->get_tickbase();
 
 		const auto& log = player_log::get_log( player->EntIndex() );
 		current_info.view_delta = log.m_view_delta;

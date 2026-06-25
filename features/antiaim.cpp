@@ -247,7 +247,7 @@ void antiaim::run_on_send()
 				if ( fabsf( delta ) >= 2.5f )
 					intermediate += ( delta > 0.f ? predicted.aim_yaw_max : predicted.aim_yaw_min ) * animations::local_record.m_yaw_modifier;
 			}
-			else if ( cmd->command_number % 2 != ( interfaces::client_state()->lastoutgoingcommand + interfaces::client_state()->chokedcommands + 1 ) % 2 )
+			else if ( cmd->command_number % 2 != globals::current_cmd->command_number % 2 )
 			{
 				static constexpr auto flop_tolerance = 6.f;
 				static constexpr auto flip_range = -152.f;
@@ -357,7 +357,7 @@ void antiaim::run_on_send()
 				const auto strafe_right = to_right_dot < -.63f;
 				const auto strafe_left = to_right_dot > .63f;
 
-				if ( cmd->command_number % 2 != ( interfaces::client_state()->lastoutgoingcommand + interfaces::client_state()->chokedcommands + 1 ) % 2 )
+				if ( cmd->command_number % 2 != globals::current_cmd->command_number % 2 )
 				{
 					if ( player->get_anim_state()->strafe_sequence != -1 || player->get_anim_state()->strafe_change_weight <= 0.f )
 						cmd->buttons |= strafe_forward ? IN_FORWARD : strafe_backwards ? IN_BACK : strafe_right ? IN_MOVERIGHT : strafe_left ? IN_MOVELEFT : 0;

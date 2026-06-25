@@ -186,21 +186,49 @@ void __cdecl hook::general_float( CRecvProxyData* pData, void* entity, void* out
 		{
 			auto& info = prediction::get_pred_info( interfaces::client_state()->command_ack );
 			info.animation.state.last_update = ticks_to_time( pData->m_Value.m_Int - 1 );
-			/*if ( pData->m_Value.m_Int == info.tick_base && info.sequence == interfaces::client_state()->command_ack && interfaces::client_state()->command_ack != interfaces::client_state()->last_command_ack )
-				tickbase::server_limit = interfaces::client_state()->m_ClockDriftMgr.m_nServerTick - pData->m_Value.m_Int + 2;*/
 
-			if ( pData->m_Value.m_Int != info.tick_base && info.sequence == interfaces::client_state()->command_ack && interfaces::client_state()->command_ack != interfaces::client_state()->last_command_ack )
+			const auto dt = interfaces::client_state()->command_ack - interfaces::client_state()->last_command_ack;
+			if (dt != 0)
 			{
+				auto sent_commands = 0;
+				for (auto i = interfaces::client_state()->last_command_ack + 1; i <= interfaces::client_state()->command_ack; i++)
+				{
+					const auto& p = prediction::get_pred_info(i);
+					if (p.sequence != i)
+						continue;
+					sent_commands += p.tickbase.sent_commands;
+				}
 
-				info.tickbase.limit = clamp( info.tickbase.limit - ( info.tick_base - static_cast< int >( pData->m_Value.m_Int ) ), 0, sv_maxusrcmdprocessticks );
-				//util::print_dev_console( true, Color::White(), "adjusted limit by - %d   new limit %d\n", info.tick_base - pData->m_Value.m_Int, info.tickbase.limit );
+				const auto processed_commands = std::min(sent_commands, dt);
+				if (info.tickbase.limit != 0)
+					info.tickbase.limit = clamp(sv_maxusrcmdprocessticks - processed_commands, 0, info.tickbase.limit);
+				else
+					info.tickbase.limit = 0;
 
-			//tickbase::limit = std::min( tickbase::limit - ( info.tick_base - static_cast< int >( pData->m_Value.m_Int ) ), 0 );
+				auto& next = prediction::get_pred_info(interfaces::client_state()->command_ack + 1);
+				if (next.sequence == interfaces::client_state()->command_ack + 1 && info.tickbase.skip_fake_commands)
+				{
+					if (!next.tickbase.skip_fake_commands && abs(info.tickbase.base - pData->m_Value.m_Int) <= 2)
+						next.tickbase.adjust = info.tickbase.base - pData->m_Value.m_Int;
+
+					if (next.tickbase.adjust == prediction::last_adjust && next.tickbase.adjust > 1)
+					{
+						if (++prediction::adjust_counter > 2 && prediction::last_adjust_spawn != player->get_spawn_time())
+						{
+							info.tickbase.limit = std::max(info.tickbase.limit - next.tickbase.adjust, 0);
+							prediction::last_adjust_spawn = player->get_spawn_time();
+							prediction::adjust_counter = 0;
+						}
+					}
+					else
+						prediction::adjust_counter = 0;
+
+					prediction::last_adjust = next.tickbase.adjust;
+				}
 			}
 
-			//util::print_dev_console( true, Color::White(), "tickbase: %d\n", pData->m_Value.m_Int );
-
-			if ( animations::lag.second == interfaces::client_state()->command_ack )
+			if ( animations::lag.second == interfaces::client_state()->command_ack &&
+				abs(animations::lag.first - pData->m_Value.m_Int) <= 4 )
 				animations::lag.first = pData->m_Value.m_Int;
 		}
 	}

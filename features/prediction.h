@@ -35,9 +35,12 @@ namespace prediction
 
 		struct tickbase_t
 		{
+			int base = {};
 			int limit = {};
+			int extra_commands = {};
 			int sent_commands = {};
-			int choked_commands = {};
+			int invalid_commands = {};
+			int adjust = {};
 			bool skip_fake_commands = {};
 		} tickbase = {};
 	};
@@ -77,6 +80,9 @@ namespace prediction
 	inline Vector initial_vel = {};
 	inline int last_update_command_number = {};
 	inline int prone_delay = {};
+	inline int last_adjust = {};
+	inline int adjust_counter = {};
+	inline float last_adjust_spawn = {};
 
 	inline static constexpr auto prone_time = 0.03448275862f;
 	inline static constexpr auto post_delay = 0.2f;

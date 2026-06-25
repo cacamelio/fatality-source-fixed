@@ -2,8 +2,9 @@
 
 void tickbase::reset()
 {
-	force_choke = force_drop = skip_next_adjust = fast_fire = hide_shot = keep_config_changed = false;
-	clock_drift = server_limit = to_recharge = to_shift = to_adjust = 0;
+	to_recharge = to_shift = to_adjust = 0;
+	delay_shift = -1;
+	force_choke = force_unchoke = skip_next_adjust = fast_fire = hide_shot = post_shift = keep_config_changed = false;
 }
 
 bool tickbase::holds_tick_base_weapon()
@@ -25,40 +26,33 @@ bool tickbase::holds_tick_base_weapon()
 		&& wpn->get_weapon_type() != WEAPONTYPE_UNKNOWN;
 }
 
-void tickbase::adjust_limit_dynamic(const bool finalize)
+void tickbase::adjust_limit_dynamic(CUserCmd* cmd)
 {
 	const auto changed = apply_static_configuration();
-	const auto ready = !to_recharge && !to_shift && !post_shift && !force_choke;
+	const auto ready = !to_shift && !post_shift && !force_choke;
 
 	if (changed)
 		keep_config_changed = force_unchoke = true;
 
 	const auto wpn = local_weapon;
-	if (!wpn || !ready)
+	if (!wpn || !ready || animations::most_recent.second != interfaces::client_state()->lastoutgoingcommand)
 		return;
 
-	const auto wpn_info = interfaces::weapon_system()->GetWpnData(wpn->get_weapon_id());
-	if (!wpn_info)
+	const auto info = interfaces::weapon_system()->GetWpnData(wpn->get_weapon_id());
+	if (!info)
 		return;
 
-	const auto cycle_diff = wpn->get_next_primary_attack() - interfaces::globals()->curtime;
-
-	if (fast_fire && (wpn->is_shootable() || wpn->is_knife()) && (wpn_info->cycle_time < 0.55f && cycle_diff > -0.2f || cycle_diff > 0.70f) && (wpn->is_knife() || !wpn->in_reload()))
-		return;
-
-	auto dont_recharge = wpn->is_grenade() && (wpn->get_pin_pulled() || wpn->get_throw_time() != 0.f);
-
+	auto dont_recharge = wpn->is_grenade() && ((wpn->get_pin_pulled() || wpn->get_throw_time() != 0.f) ||
+		aimbot::last_target != -1 || prediction::had_attack || cmd->weaponselect);
 	if (dont_recharge)
 		keep_config_changed = false;
 
 	const auto diff_wpn = wpn->get_next_primary_attack() - interfaces::globals()->curtime;
-	const float curtime = interfaces::globals()->curtime;
-	const auto diff_player = local_player->get_next_attack() - interfaces::globals()->curtime;
-
-	if (!dont_recharge && !changed && (fast_fire || hide_shot) && (wpn->is_shootable() || wpn->is_knife()) &&
-		((wpn_info->cycle_time < .55f && diff_wpn > -.2f) || diff_wpn > .7f) && (wpn->is_knife() || !wpn->in_reload()))
+	if (!dont_recharge && !changed && fast_fire && (wpn->is_shootable() || wpn->is_knife()) &&
+		((info->cycle_time < .55f && diff_wpn > -.2f) || diff_wpn > .7f) && (wpn->is_knife() || !wpn->in_reload()))
 		dont_recharge = true;
 
+	const auto diff_player = local_player->get_next_attack() - interfaces::globals()->curtime;
 	if (!dont_recharge && diff_player > .7f)
 		dont_recharge = true;
 
@@ -69,142 +63,29 @@ void tickbase::adjust_limit_dynamic(const bool finalize)
 		to_recharge = 0;
 
 	const auto diff = determine_optimal_limit() - compute_current_limit();
-	const bool standing = local_player && local_player->get_velocity().Length() < 1.1f && globals::current_cmd && globals::current_cmd->forwardmove == 0.f && globals::current_cmd->sidemove == 0.f;
-
-	if (diff >= -2 && diff <= 2) {
-		if (!diff) keep_config_changed = false;
-		return;
-	}
-
-	if (diff > 0 && (vars::aim.silent->get<bool>() || aimbot::last_target == -1) && !dont_recharge && !finalize && (diff > 2 || standing))
+	const auto standing = prediction::get_pred_info((cmd->command_number - 1)).velocity.Length() < 1.1f &&
+		prediction::unpred_move.x == 0.f && prediction::unpred_move.y == 0.f;
+	if (!dont_recharge && diff > 0 && (diff > 2 || standing))
 	{
 		to_recharge = diff;
-		prediction::take_shot(false);
-		globals::current_cmd->buttons &= ~IN_ATTACK2;
+		to_shift = 0;
 	}
-	else if (diff < 0 && !finalize)
+	else if (diff < 0)
 	{
+		to_recharge = 0;
 		to_shift = -diff;
 	}
 
 	if (!diff)
 		keep_config_changed = false;
-
 }
 
-void tickbase::on_recharge(const CUserCmd* cmd)
-{
-	auto& info = prediction::get_pred_info(cmd->command_number);
-	if (info.sequence != cmd->command_number)
-	{
-		info.reset();
-		info.sequence = cmd->command_number;
-	}
-
-	info.tickbase.choked_commands += 1;
-}
-
-void tickbase::on_finish_command(bool sendpacket, const CUserCmd* cmd)
-{
-	auto& info = prediction::get_pred_info(cmd->command_number);
-	if (info.sequence != cmd->command_number)
-		return;
-
-	if (to_shift > 0)
-		info.tickbase.sent_commands += 1;
-
-	if (sendpacket)
-		fill_fake_commands();
-}
-
-void tickbase::on_send_command(const CUserCmd* cmd)
-{
-	to_adjust = 0;
-
-	auto& info = prediction::get_pred_info(cmd->command_number);
-	if (info.sequence != cmd->command_number)
-		return;
-
-	if (antiaim::started_peek_fakelag() && !to_shift && !to_recharge) // in onpeek and unduck
-		skip_next_adjust = true;
-
-	if (skip_next_adjust)
-		interfaces::prediction()->get_predicted_commands() = clamp(interfaces::client_state()->lastoutgoingcommand - interfaces::client_state()->last_command_ack, 0, interfaces::prediction()->get_predicted_commands());
-	else
-		to_adjust = sv_maxusrcmdprocessticks - (interfaces::client_state()->chokedcommands + 1);
-
-	apply_static_configuration();
-
-	info.tickbase.skip_fake_commands = skip_next_adjust;
-
-	compute_current_limit(cmd->command_number);
-}
-
-int tickbase::compute_current_limit(int command_number)
-{
-	if (!command_number)
-		return 0;
-
-	const auto& last_ack_info = prediction::get_pred_info(interfaces::client_state()->last_command_ack);
-
-	const auto max_process_ticks = sv_maxusrcmdprocessticks;
-
-	auto limit = last_ack_info.sequence == interfaces::client_state()->last_command_ack ? last_ack_info.tickbase.limit : 16;
-	for (auto i = interfaces::client_state()->last_command_ack + 1; i <= command_number; i++)
-	{
-		auto& info = prediction::get_pred_info(i);
-		if (info.sequence != interfaces::input()->m_pCommands[i % 150].command_number)
-			continue;
-
-		info.tickbase.limit = clamp(limit + info.tickbase.choked_commands, 0, max_process_ticks);
-		info.tickbase.limit = std::max(info.tickbase.limit - info.tickbase.sent_commands, 0);
-		limit = info.tickbase.limit;
-	}
-
-	return limit;
-}
-
-void tickbase::on_runcmd(const CUserCmd* cmd, int& tickbase)
-{
-	const auto& current_info = prediction::get_pred_info(cmd->command_number);
-
-	if (cmd->command_number != current_info.sequence)
-		return;
-
-	auto to_adjust = 0;
-	std::optional<bool> prev_skip_fake_commands;
-	for (auto i = interfaces::client_state()->last_command_ack; i <= cmd->command_number; i++)
-	{
-		const auto& info = prediction::get_pred_info(i);
-		if (info.sequence != interfaces::input()->m_pCommands[i % 150].command_number)
-			continue;
-
-		if (info.tickbase.choked_commands > 0)
-		{
-			prev_skip_fake_commands = false;
-			continue;
-		}
-
-		if (!prev_skip_fake_commands.has_value())
-			prev_skip_fake_commands = info.tickbase.skip_fake_commands;
-
-		if (prev_skip_fake_commands != info.tickbase.skip_fake_commands)
-			to_adjust = info.tickbase.skip_fake_commands ? info.tickbase.limit : -info.tickbase.limit;
-		else
-			to_adjust = 0;
-
-		prev_skip_fake_commands = info.tickbase.skip_fake_commands;
-	}
-
-	/*if ( to_adjust != 0 )
-		util::print_dev_console( true, Color::White(), "tickbase: %d adjusted %d\n", tickbase, to_adjust );*/
-
-	tickbase += to_adjust;
-}
-
-void tickbase::attempt_shift_back(bool& send_packet)
+bool tickbase::attempt_shift_back(bool& send_packet)
 {
 	const auto weapon = local_weapon;
+	if (!weapon)
+		return true;
+
 	const auto is_revolver = weapon->get_weapon_id() == WEAPON_REVOLVER;
 
 	const auto dont = (fast_fire || hide_shot) && is_revolver || globals::shot_command <= interfaces::client_state()->lastoutgoingcommand || to_shift > 0;
@@ -228,7 +109,7 @@ void tickbase::attempt_shift_back(bool& send_packet)
 
 		misc::retract_peek = false;
 
-		return;
+		return false;
 	}
 
 	if (fast_fire)
@@ -239,6 +120,8 @@ void tickbase::attempt_shift_back(bool& send_packet)
 
 		send_packet = true;
 	}
+
+	return true;
 }
 
 void tickbase::revert_shift_back()
@@ -246,10 +129,49 @@ void tickbase::revert_shift_back()
 	to_shift = 0;
 }
 
+void tickbase::on_send_command(int command_number)
+{
+	to_adjust = 0;
+
+	const auto wpn = local_weapon;
+
+	auto& p1 = prediction::get_pred_info(command_number);
+	if (p1.sequence != command_number)
+		return;
+
+	p1.tickbase.sent_commands = interfaces::client_state()->chokedcommands + 1;
+
+	if (((fast_fire && vars::aim.doubletap->get<bool>()) || hide_shot) &&
+		wpn->get_weapon_id() != WEAPON_REVOLVER && antiaim::started_peek_fakelag() && !to_shift)
+		skip_next_adjust = true;
+
+	if (skip_next_adjust)
+		interfaces::prediction()->get_predicted_commands() =
+		clamp(interfaces::client_state()->lastoutgoingcommand - interfaces::client_state()->last_command_ack, 0,
+			interfaces::prediction()->get_predicted_commands());
+	else
+		to_adjust = p1.tickbase.limit;
+
+	for (auto i = interfaces::client_state()->lastoutgoingcommand + 1; i <= command_number; i++)
+	{
+		auto& p2 = prediction::get_pred_info(i);
+		if (p2.sequence != i)
+			continue;
+		p2.tickbase.skip_fake_commands = skip_next_adjust;
+	}
+
+	compute_current_limit(command_number);
+}
+
 void tickbase::fill_fake_commands()
 {
-	skip_next_adjust = false;
+	const auto wpn = local_weapon;
+	if (!wpn)
+		return;
 
+	const auto is_grenade = wpn->is_grenade();
+
+	skip_next_adjust = false;
 	for (auto i = 0; i < to_adjust; i++)
 	{
 		interfaces::client_state()->chokedcommands++;
@@ -257,30 +179,83 @@ void tickbase::fill_fake_commands()
 		const auto cmd = &interfaces::input()->m_pCommands[sequence % 150];
 		*cmd = *globals::current_cmd;
 		cmd->command_number = sequence;
+		if (!is_grenade)
+			cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
 		cmd->tick_count = globals::current_cmd->tick_count + 200 + i;
-		cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
 		misc::write_tick(cmd->command_number);
 	}
 }
 
-//void tickbase::apply_static_configuration()
+void tickbase::on_runcmd(const CUserCmd* cmd, int& tickbase)
+{
+	const auto& p1 = prediction::get_pred_info(cmd->command_number);
+	if (p1.sequence != cmd->command_number)
+		return;
+
+	auto to_adjust = 0;
+	std::optional<bool> prev_skip_fake_commands;
+
+	for (auto i = interfaces::client_state()->last_command_ack; i <= cmd->command_number; i++)
+	{
+		const auto& p2 = prediction::get_pred_info(i);
+		if (p2.sequence != i)
+			continue;
+
+		if (p2.tickbase.invalid_commands > 0)
+		{
+			prev_skip_fake_commands = false;
+			continue;
+		}
+
+		if (!prev_skip_fake_commands.has_value())
+			prev_skip_fake_commands = p2.tickbase.skip_fake_commands;
+
+		if (prev_skip_fake_commands != p2.tickbase.skip_fake_commands)
+			to_adjust = (p2.tickbase.skip_fake_commands ? p2.tickbase.limit : -p2.tickbase.limit) + p2.tickbase.adjust;
+		else
+			to_adjust = 0;
+
+		prev_skip_fake_commands = p2.tickbase.skip_fake_commands;
+	}
+
+	tickbase += to_adjust;
+}
+
+void tickbase::on_recharge(int command_number)
+{
+	auto& p = prediction::get_pred_info(command_number);
+	p.reset();
+	p.sequence = command_number;
+	p.tickbase.invalid_commands++;
+}
+
+void tickbase::on_finish_command(bool send_packet)
+{
+	const auto cmd = interfaces::client_state()->lastoutgoingcommand + interfaces::client_state()->chokedcommands + 1;
+	auto& p = prediction::get_pred_info(cmd);
+	if (p.sequence != cmd)
+		return;
+
+	if (to_shift > 0)
+		p.tickbase.extra_commands++;
+
+	if (send_packet)
+		fill_fake_commands();
+}
+
 bool tickbase::apply_static_configuration()
 {
 	const auto previous = fast_fire || hide_shot;
-	//const auto wpn = local_weapon;
+
 	if (vars::aim.fake_duck->get<bool>())
-	{
 		fast_fire = hide_shot = false;
-		//return;
-	}
-	else //if (wpn)
+	else
 	{
 		fast_fire = vars::aim.doubletap->get<bool>();
 		hide_shot = !fast_fire && vars::aim.silent->get<bool>();
 	}
 
 	return previous != (fast_fire || hide_shot);
-
 }
 
 int tickbase::determine_optimal_shift()
@@ -305,6 +280,27 @@ int tickbase::determine_optimal_limit()
 		return max_new_cmds;
 
 	return 0;
+}
+
+int tickbase::compute_current_limit(int command_number)
+{
+	if (!command_number)
+		return 0;
+
+	const auto& p = prediction::get_pred_info(interfaces::client_state()->last_command_ack);
+	auto limit = p.sequence == interfaces::client_state()->last_command_ack ? p.tickbase.limit : 0;
+
+	for (auto i = interfaces::client_state()->last_command_ack + 1; i <= command_number; i++)
+	{
+		auto& p2 = prediction::get_pred_info(i);
+		if (p2.sequence != i)
+			continue;
+
+		p2.tickbase.limit = clamp(limit + p2.tickbase.invalid_commands, 0, sv_maxusrcmdprocessticks);
+		p2.tickbase.limit = limit = std::max(p2.tickbase.limit - p2.tickbase.extra_commands, 0);
+	}
+
+	return limit;
 }
 
 float tickbase::get_adjusted_time()

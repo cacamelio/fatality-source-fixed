@@ -1084,6 +1084,9 @@ void animations::predict_animation_state( lag_record_t& record, C_CSPlayer* play
 
 			if ( !force_angle )
 			{
+				const auto cmd_num = interfaces::client_state()->lastoutgoingcommand + 1 + i;
+				const auto current_cmd_num = interfaces::client_state()->lastoutgoingcommand + interfaces::client_state()->chokedcommands + 1;
+
 				if ( player->get_anim_state()->last_framecount >= interfaces::globals()->framecount )
 					player->get_anim_state()->last_framecount = interfaces::globals()->framecount - 1;
 
@@ -1099,7 +1102,7 @@ void animations::predict_animation_state( lag_record_t& record, C_CSPlayer* play
 
 				angles = !should_apply_antiaim ? globals::current_cmd->viewangles : antiaim::target_angle + QAngle( 0, final_add, 0 );
 
-				if ( should_apply_antiaim && i != interfaces::client_state()->chokedcommands + 1 && vars::aa.fake->get<bool>() )
+				if ( should_apply_antiaim && i < interfaces::client_state()->chokedcommands && vars::aa.fake->get<bool>() )
 				{
 					auto intermediate = 0.f;
 
@@ -1113,7 +1116,7 @@ void animations::predict_animation_state( lag_record_t& record, C_CSPlayer* play
 						if ( fabsf( delta ) >= 2.5f )
 							intermediate += ( delta > 0.f ? predicted.aim_yaw_max : predicted.aim_yaw_min ) * animations::local_record.m_yaw_modifier;
 					}
-					else if ( i % 2 != ( interfaces::client_state()->chokedcommands + 1 ) % 2 )
+					else if ( cmd_num % 2 != current_cmd_num % 2 )
 					{
 						static constexpr auto flop_tolerance = 6.f;
 						static constexpr auto flip_range = -152.f;
@@ -1137,7 +1140,7 @@ void animations::predict_animation_state( lag_record_t& record, C_CSPlayer* play
 
 					if ( vars::aa.strafing->get<int>() > 1 && predicted.running_speed >= .65f )
 					{
-						if ( i % 2 != ( interfaces::client_state()->chokedcommands + 1 ) % 2 )
+						if ( cmd_num % 2 != current_cmd_num % 2 )
 						{
 							if ( player->get_anim_state()->strafe_sequence != -1 || player->get_anim_state()->strafe_change_weight <= 0.f )
 								player->get_strafing() = true;
@@ -1147,7 +1150,7 @@ void animations::predict_animation_state( lag_record_t& record, C_CSPlayer* play
 
 				player->get_anim_state()->update( angles );
 
-				if ( should_apply_antiaim && i == interfaces::client_state()->chokedcommands + 1 )
+				if ( should_apply_antiaim && i == interfaces::client_state()->chokedcommands )
 				{
 					auto roll_dir = target_direction;
 					if ( antiaim::in_flip && vars::aa.jitter->get<bool>() && vars::aa.flip_lean->get<bool>() )

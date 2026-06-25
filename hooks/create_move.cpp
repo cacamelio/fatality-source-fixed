@@ -151,9 +151,29 @@ void __stdcall cl_create_move( int sequence_number, float input_sample_frametime
 	misc::bhop( true );
 
 	if ( !tickbase::force_choke )
-		tickbase::adjust_limit_dynamic();
+		tickbase::adjust_limit_dynamic( cmd );
 
 	*globals::send_packet = !tickbase::force_choke;
+
+	if (tickbase::to_recharge > 0 && !interfaces::client_state()->chokedcommands && globals::shot_command != cmd->command_number &&
+		aimbot::last_target == -1 && !cmd->weaponselect)
+	{
+		sendpacket = false;
+		tickbase::to_recharge--;
+		interfaces::prediction()->SetLocalViewAngles(cmd->viewangles);
+		prediction::finish(false);
+
+		cmd->tick_count = INT_MAX;
+		cmd->buttons = 0;
+		misc::write_tick(cmd->command_number);
+		interfaces::input()->m_pCommands[cmd->command_number % 150].hasbeenpredicted = true;
+
+		tickbase::on_recharge(cmd->command_number);
+		tickbase::compute_current_limit();
+
+		globals::in_cm = false;
+		return;
+	}
 
 	//if ( vars::visuals.esp.flags.hit->get<bool>() && !tickbase::force_choke && ( vars::aa.enabled->get<bool>() || vars::aa.choke_mode->get<int>() ) )
 	//	antiaim::check_hittable();
@@ -236,13 +256,23 @@ void __stdcall cl_create_move( int sequence_number, float input_sample_frametime
 			if ( local_player->get_tickbase() > animations::lag.first - 2 || --shift_back < 0 )
 			{
 				shift_back = -1;
-				tickbase::attempt_shift_back( sendpacket );
+				if (!tickbase::attempt_shift_back( sendpacket ))
+				{
+					prediction::take_shot(false);
+					prediction::take_secondary_shot(false);
+					cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
+				}
 			}
 		}
 		else
 		{
 			shift_back = -1;
-			tickbase::attempt_shift_back( sendpacket );
+			if (!tickbase::attempt_shift_back( sendpacket ))
+			{
+				prediction::take_shot(false);
+				prediction::take_secondary_shot(false);
+				cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
+			}
 		}
 	}
 
@@ -347,68 +377,114 @@ __declspec( naked ) void rest_of_clmove()
 	}
 }
 
+void send_netmsg_tick()
+{
+	const auto net_channel = interfaces::client_state()->m_NetChannel;
+	if (!net_channel || interfaces::client_state()->m_bPaused)
+		return;
+
+	const auto engine_base = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
+	const auto ctor = reinterpret_cast<void(__thiscall*)(uintptr_t, int32_t)>(engine_base + 0xC6220);
+	const auto dtor = reinterpret_cast<void(__thiscall*)(void*)>(engine_base + 0xA8D20);
+	const auto host = engine_base + 0xDD696;
+
+	const auto xmm0_param = *reinterpret_cast<float*>(*reinterpret_cast<uintptr_t*>(host + 0x4));
+	const auto xmm3_param = *reinterpret_cast<float*>(*reinterpret_cast<uintptr_t*>(host + 0x8 + 0x4));
+	const auto xmm2_param = *reinterpret_cast<float*>(*reinterpret_cast<uintptr_t*>(host + 0x10 + 0x4));
+
+	uint8_t net_msg[0x44];
+	const auto thisptr = reinterpret_cast<uintptr_t>(net_msg);
+	const auto tick = interfaces::client_state()->m_nDeltaTick;
+
+	__asm
+	{
+		movss xmm0, xmm0_param
+		push xmm0_param
+		movss xmm3, xmm3_param
+		movss xmm2, xmm2_param
+		push tick
+		mov ecx, thisptr
+		mov eax, [ctor]
+		call eax
+	}
+
+	net_channel->SendNetMsg(net_msg);
+	dtor(net_msg);
+}
+
 void __stdcall cl_move(const float accumulated_extra_sample, const bool final_tick)
 {
-	if (interfaces::client_state()->m_nSignonState != SIGNONSTATE_FULL || !local_player || !local_player->get_alive())
+	const auto start = interfaces::client_state()->lastoutgoingcommand;
+
+	if (interfaces::client_state()->m_nSignonState != SIGNONSTATE_FULL || !interfaces::client_state()->m_NetChannel || interfaces::client_state()->m_bPaused ||
+		!local_player || !local_player->get_alive())
 	{
+		tickbase::reset();
 		original_cl_move(accumulated_extra_sample, final_tick);
-		globals::sent_commands.push_back(interfaces::client_state()->lastoutgoingcommand);
-		tickbase::post_shift = false;
+		if (start != interfaces::client_state()->lastoutgoingcommand)
+			globals::sent_commands.push_back(interfaces::client_state()->lastoutgoingcommand);
 		return;
 	}
 
 	interfaces::client_state()->process_sockets();
-	interfaces::prediction()->Update(interfaces::client_state()->m_nDeltaTick, true, interfaces::client_state()->last_command_ack, interfaces::client_state()->lastoutgoingcommand + interfaces::client_state()->chokedcommands);
 
-	const auto out_sequence = interfaces::client_state()->lastoutgoingcommand;
-
-	const auto recharge = tickbase::to_recharge > 0 && !interfaces::client_state()->chokedcommands;
-	if (recharge)
+	// could be disconnected now.
+	if (!interfaces::client_state()->m_NetChannel)
 	{
-		tickbase::to_recharge--;
-
-		const auto current_tick = interfaces::client_state()->lastoutgoingcommand + 1;
-
-		interfaces::input()->m_pCommands[current_tick % 150] = interfaces::input()->m_pCommands[out_sequence % 150];
-		interfaces::input()->m_pCommands[current_tick % 150].tick_count = INT_MAX;
-		interfaces::input()->m_pCommands[current_tick % 150].command_number = current_tick;
-		misc::write_tick(current_tick);
-
-		globals::current_cmd = &interfaces::input()->m_pCommands[current_tick % 150];
-
-		tickbase::on_recharge(globals::current_cmd);
-		tickbase::compute_current_limit();
-
-		return; // don't call clmove
+		tickbase::reset();
+		original_cl_move(accumulated_extra_sample, final_tick);
+		return;
 	}
 
+	interfaces::prediction()->Update(interfaces::client_state()->m_nDeltaTick, true, interfaces::client_state()->last_command_ack,
+		interfaces::client_state()->lastoutgoingcommand + interfaces::client_state()->chokedcommands);
+
 	tickbase::to_adjust = 0;
-	tickbase::force_choke = false;
-	tickbase::force_unchoke = false;
+	tickbase::force_choke = tickbase::force_unchoke = false;
 	original_cl_move(accumulated_extra_sample, final_tick);
 
 	if (tickbase::to_shift > 0)
 	{
-		for (auto i = 0; i < tickbase::to_shift; i++)
+		while (tickbase::to_shift > 0)
 		{
-			tickbase::force_choke = true;
-			original_cl_move(accumulated_extra_sample, final_tick);
-		}
-
-		tickbase::to_shift = 0;
-		tickbase::post_shift = true;
-		interfaces::prediction()->get_predicted_commands() = clamp(interfaces::client_state()->lastoutgoingcommand + 1 - interfaces::client_state()->last_command_ack, 0, interfaces::prediction()->get_predicted_commands());
-
-		if (out_sequence == interfaces::client_state()->lastoutgoingcommand && interfaces::client_state()->m_NetChannel)
-		{
-			interfaces::client_state()->m_NetChannel->m_nOutSequenceNr--;
-			interfaces::client_state()->m_NetChannel->m_nChokedPackets = 0;
+			tickbase::force_choke = --tickbase::to_shift > 0;
+			if (!tickbase::to_shift)
+			{
+				tickbase::post_shift = true;
+				interfaces::prediction()->get_predicted_commands() =
+					clamp(interfaces::client_state()->lastoutgoingcommand - interfaces::client_state()->last_command_ack, 0,
+						interfaces::prediction()->get_predicted_commands());
+				for (auto i = interfaces::client_state()->lastoutgoingcommand + 1;
+					i <= interfaces::client_state()->lastoutgoingcommand + interfaces::client_state()->chokedcommands; i++)
+					interfaces::input()->m_pCommands[i % 150].hasbeenpredicted = false;
+				interfaces::prediction()->Update(interfaces::client_state()->m_nDeltaTick, true, interfaces::client_state()->last_command_ack,
+					interfaces::client_state()->lastoutgoingcommand + interfaces::client_state()->chokedcommands);
+			}
+			original_cl_move(interfaces::globals()->interval_per_tick, final_tick);
 		}
 	}
 
+	if (start == interfaces::client_state()->lastoutgoingcommand)
+	{
+		interfaces::client_state()->m_NetChannel->m_nOutSequenceNr--;
+		interfaces::client_state()->m_NetChannel->m_nChokedPackets = 0;
+
+		const auto recharge = interfaces::input()->m_pCommands[(start + 1) % 150].tick_count == INT_MAX;
+		if (recharge)
+			interfaces::client_state()->chokedcommands--;
+
+		send_netmsg_tick();
+		const auto next_command = interfaces::client_state()->m_NetChannel->SendDatagram();
+
+		if (recharge)
+			interfaces::client_state()->lastoutgoingcommand = next_command;
+	}
+	else
+	{
 		tickbase::post_shift = false;
 		tickbase::compute_current_limit(interfaces::client_state()->lastoutgoingcommand);
 		globals::sent_commands.push_back(interfaces::client_state()->lastoutgoingcommand);
+	}
 }
 
 __declspec( naked ) void hook::cl_move_naked()
