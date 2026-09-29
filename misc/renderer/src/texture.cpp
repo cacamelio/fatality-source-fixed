@@ -7,6 +7,7 @@
 #include <ren/texture.h>
 #include <ren/adapter.h>
 
+#define STBI_NO_THREAD_LOCALS
 #include <deps/stb/stb_image.h>
 
 using namespace evo::ren;

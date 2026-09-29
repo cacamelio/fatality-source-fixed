@@ -8,12 +8,16 @@ extern "C" _PIFV * __xi_z;
 extern "C" _PVFV * __xc_a;
 extern "C" _PVFV * __xc_z;
 
-void __stdcall init_main()
+DWORD WINAPI init_main( LPVOID )
 {
-	init::on_startup();
-}
+	_( logfile, "flog.log" );
+	std::ofstream of( logfile, std::ofstream::out | std::ofstream::trunc );
+	of.close();
+	log( "start --------\n" );
 
-thread_local static std::string test = "---------- ";
+	init::on_startup();
+	return 0;
+}
 
 BOOL APIENTRY DllMain( HMODULE h_module, uintptr_t  dw_reason_for_call, LPVOID lp_reserved )
 {
@@ -21,17 +25,7 @@ BOOL APIENTRY DllMain( HMODULE h_module, uintptr_t  dw_reason_for_call, LPVOID l
 	{
 		case DLL_PROCESS_ATTACH:
 		{
-			_( logfile, "flog.log" );
-			std::ofstream of( logfile, std::ofstream::out | std::ofstream::trunc );
-			of.close();
-			log( "start --------" );
-
-			util::print_log( test.c_str() );
-
-			log( "\n" );
-
 			textstart = reinterpret_cast< uint32_t >( globals::module_base = h_module );
-			imp( "kernel32.dll", DisableThreadLibraryCalls )( h_module );
 
 #ifdef RELEASE
 			HANDLE thread;
@@ -40,7 +34,8 @@ BOOL APIENTRY DllMain( HMODULE h_module, uintptr_t  dw_reason_for_call, LPVOID l
 			sysunlock();
 #else
 			DWORD tid;
-			CloseHandle( CreateThread( nullptr, 0, reinterpret_cast< LPTHREAD_START_ROUTINE >( init_main ), nullptr, 0, &tid ) );
+			if ( const auto thread = CreateThread( nullptr, 0, init_main, nullptr, 0, &tid ) )
+				CloseHandle( thread );
 #endif
 			return true;
 		}

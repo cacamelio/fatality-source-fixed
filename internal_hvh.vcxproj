@@ -194,7 +194,7 @@
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
-      <AdditionalOptions>/Zo %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/Zo /Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <ObjectFileName>$(IntDir)/%(RelativeDir)/</ObjectFileName>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
@@ -238,7 +238,7 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <PreprocessorDefinitions>_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;_WIN32;NDEBUG;EVO_USE_DX9;NO_VIRT;DEBUG_LOG;NO_NETOFFSETS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalOptions>/Zc:threadSafeInit /Oy- %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/Zc:threadSafeInit- /Oy- %(AdditionalOptions)</AdditionalOptions>
       <ExceptionHandling>Sync</ExceptionHandling>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <SDLCheck>false</SDLCheck>
@@ -282,7 +282,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <PreprocessorDefinitions>_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;_HAS_STATIC_RTTI=0;_WIN32;NDEBUG;RELEASE;EVO_USE_DX9;ALPHA;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalOptions>-Wno-logical-op-parentheses -Wno-microsoft-cast -Wno-narrowing -Wno-return-type -Wno-bitwise-op-parentheses -Wno-unused-function -Wno-microsoft-enum-forward-reference -Wno-overloaded-virtual -Wno-reorder -Wno-misleading-indentation -Wno-unused-private-field /Zc:threadSafeInit /Oy- -Xclang -fno-rtti -Xclang -fno-rtti-data -flto %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-Wno-logical-op-parentheses -Wno-microsoft-cast -Wno-narrowing -Wno-return-type -Wno-bitwise-op-parentheses -Wno-unused-function -Wno-microsoft-enum-forward-reference -Wno-overloaded-virtual -Wno-reorder -Wno-misleading-indentation -Wno-unused-private-field /Zc:threadSafeInit- /Oy- -Xclang -fno-rtti -Xclang -fno-rtti-data -flto %(AdditionalOptions)</AdditionalOptions>
       <ExceptionHandling>Sync</ExceptionHandling>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <SDLCheck>false</SDLCheck>
@@ -326,6 +326,7 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <PreprocessorDefinitions>_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;_WIN32;NDEBUG;EVO_USE_DX9;NO_VIRT;DEBUG_LOG;NO_NETOFFSETS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpplatest</LanguageStandard>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
       <ExceptionHandling>Sync</ExceptionHandling>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <SDLCheck>false</SDLCheck>
